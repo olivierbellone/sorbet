@@ -810,7 +810,7 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                                                          makeField("rangeLength", makeOptional(JSONInt)),
                                                          makeField("text", JSONString),
                                                      },
-                                                     classTypes);
+                                                     classTypes, {"std::string apply(std::string oldContents) const;"});
 
     auto DidChangeTextDocumentParams =
         makeObject("DidChangeTextDocumentParams",
@@ -818,7 +818,7 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                        makeField("textDocument", VersionedTextDocumentIdentifier),
                        makeField("contentChanges", makeArray(TextDocumentContentChangeEvent)),
                    },
-                   classTypes);
+                   classTypes, {"std::string getSource(std::string_view oldFileContents) const;"});
 
     auto TextDocumentChangeRegistrationOptions =
         makeObject("TextDocumentChangeRegistrationOptions",
@@ -1240,11 +1240,7 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
                    classTypes);
 
     // Empty object.
-    auto InitializedParams = makeObject("InitializedParams", {}, classTypes,
-                                        {
-                                            "// Contains initialization state from preprocessing step.",
-                                            "LSPFileUpdates updates;",
-                                        });
+    auto InitializedParams = makeObject("InitializedParams", {}, classTypes);
 
     /* Sorbet LSP extensions */
     auto SorbetOperationStatus = makeStrEnum("SorbetOperationStatus", {"start", "end"}, enumTypes);
@@ -1275,8 +1271,11 @@ void makeLSPTypes(vector<shared_ptr<JSONClassType>> &enumTypes, vector<shared_pt
     auto SorbetWorkspaceEditParams =
         makeObject("SorbetWorkspaceEditParams", {}, classTypes,
                    {
-                       "// Contains distilled file updates combined from one or more file update notifications.",
-                       "LSPFileUpdates updates;",
+                       "u4 epoch = 0;",
+                       "u2 mergeCount = 0;",
+                       "std::vector<std::shared_ptr<core::File>> updates;",
+                       "// Merge newerParams into this object, which mutates `epoch` and `updates`",
+                       "void merge(SorbetWorkspaceEditParams &newerParams);",
                    });
 
     auto SorbetTypecheckRunInfo = makeObject("SorbetTypecheckRunInfo",

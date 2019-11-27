@@ -16,17 +16,25 @@
 namespace sorbet::realmain::lsp {
 using namespace std;
 
-LSPTypechecker::LSPTypechecker(const std::shared_ptr<const LSPConfiguration> &config)
-    : typecheckerThreadId(this_thread::get_id()), config(config) {}
+LSPTypechecker::LSPTypechecker(shared_ptr<const LSPConfiguration> config)
+    : typecheckerThreadId(this_thread::get_id()), config(move(config)) {}
 
-void LSPTypechecker::initialize(LSPFileUpdates updates) {
-    globalStateHashes = move(updates.updatedFileHashes);
-    indexed = move(updates.updatedFileIndexes);
+void LSPTypechecker::initialize(unique_ptr<core::GlobalState> gs, vector<ast::ParsedFile> indexed,
+                                vector<core::FileHash> globalStateHashes) {
+    this->globalStateHashes = move(globalStateHashes);
+    this->indexed = move(indexed);
+
+    // Construct a file updates object for initialization so we can typecheck it.
+    LSPFileUpdates updates;
+    updates.canTakeFastPath = false;
+    updates.epoch = 0;
+    updates.updatedGS = move(gs);
+
     // Initialization typecheck is not cancelable.
     auto run = runSlowPath(move(updates), /* cancelable */ false);
     ENFORCE(!run.canceled);
     ENFORCE(run.newGS.has_value());
-    gs = move(run.newGS.value());
+    this->gs = move(run.newGS.value());
     pushDiagnostics(move(run));
 }
 
@@ -157,7 +165,7 @@ TypecheckRun LSPTypechecker::runSlowPath(LSPFileUpdates updates, bool isCancelab
     finalGS->errorQueue->ignoreFlushes = true;
     // Note: Commits can only be canceled if this edit is cancelable, LSP is running across multiple threads, and the
     // cancelation feature is enabled.
-    const bool committed = finalGS->tryCommitEpoch(updates.versionEnd, isCancelable, [&]() -> void {
+    const bool committed = finalGS->tryCommitEpoch(updates.epoch, isCancelable, [&]() -> void {
         // Index the updated files using finalGS.
         {
             core::UnfreezeFileTable fileTableAccess(*finalGS);
@@ -335,14 +343,12 @@ void LSPTypechecker::pushDiagnostics(TypecheckRun run) {
                                                  make_unique<PublishDiagnosticsParams>(uri, move(diagnostics)))));
         }
     }
-    return;
 }
 
 void LSPTypechecker::commitTypecheckRun(TypecheckRun run) {
     auto &logger = config->logger;
     if (run.canceled) {
-        logger->debug("[Typechecker] Typecheck run for edits {} thru {} was canceled.", run.updates.versionStart,
-                      run.updates.versionEnd);
+        logger->debug("[Typechecker] Typecheck run for epoch {} was canceled.", run.updates.epoch);
         return;
     }
 
